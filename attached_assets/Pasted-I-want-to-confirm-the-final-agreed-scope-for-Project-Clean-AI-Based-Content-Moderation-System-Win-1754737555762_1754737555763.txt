@@ -1,0 +1,64 @@
+I want to confirm the final agreed scope for Project Clean – AI-Based Content Moderation System (Windows/Linux Offline Version) before you start building.
+
+Please go through each point below and confirm Yes if you will implement it exactly as written. If anything is not possible, tell me now so we can adjust.
+
+1. Platform & Installation
+
+Windows installer (.exe) with one-click setup and auto SQLite database initialization.
+
+Linux installer (.deb or .AppImage) with no extra configuration needed.
+
+AI models + database included inside the installer so it works fully offline after install.
+
+You will provide proof (video or screenshots) showing it runs offline after install.
+
+2. Core Features
+
+Offline moderation for text (English + Hindi) and images.
+
+Explainable AI with clear reason codes for flagged content.
+
+User registration/login, reputation scoring, warnings/restrictions/bans.
+
+Admin dashboard for reviewing flagged posts, managing users, logs, and analytics.
+
+Reputation algorithm with fixed scoring rules and thresholds.
+
+Social media demo UI with post creation, comments, feed, and live moderation feedback.
+
+3. Technical Implementation
+
+Frontend: React.js + Tailwind/Shadcn UI.
+
+Backend API: Node.js + Express.js.
+
+AI service: Python Flask with lightweight spaCy, IndicBERT-lite, and OpenCV models.
+
+Database: SQLite with sample data preloaded.
+
+Authentication: JWT + bcrypt (offline capable).
+
+4. Performance & Offline Proof
+
+AI models optimized for CPU-only, under 2 seconds average response time.
+
+Runs smoothly on laptops with 4GB RAM.
+
+No internet calls for moderation — all processing local.
+
+Supports at least 1000+ users and 10,000+ posts in demo mode.
+
+5. Deliverables
+
+Windows and Linux installers.
+
+Full source code with comments.
+
+User manual and technical documentation.
+
+Demo data in SQLite.
+
+Demo script for academic presentation.
+
+Please confirm “YES” if you will implement all of the above exactly as written. If not, list the points you cannot do so we can finalize before starting.
+
