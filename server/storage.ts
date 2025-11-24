@@ -21,6 +21,7 @@ import {
   type InsertContentReport,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import bcrypt from "bcrypt";
 
 export interface IStorage {
   // User operations
@@ -85,10 +86,10 @@ export class MemStorage implements IStorage {
   private contentReports: Map<string, ContentReport> = new Map();
 
   constructor() {
-    this.initializeDefaultData();
+    this.initializeDefaultData().catch(console.error);
   }
 
-  private initializeDefaultData(): void {
+  private async initializeDefaultData(): Promise<void> {
     // Initialize AI model statuses
     const textModel: AIModelStatus = {
       id: randomUUID(),
@@ -127,12 +128,13 @@ export class MemStorage implements IStorage {
     this.aiModelStatuses.set(imageModel.modelName, imageModel);
     this.aiModelStatuses.set(videoModel.modelName, videoModel);
 
-    // Create admin user
+    // Create admin user with properly hashed password
+    const hashedPassword = await bcrypt.hash("admin", 10);
     const adminUser: User = {
       id: randomUUID(),
       username: "admin",
       email: "admin@projectclean.com",
-      password: "$2b$10$hashedpassword", // In real app, this would be properly hashed
+      password: hashedPassword,
       firstName: "Sarah",
       lastName: "Johnson",
       profileImageUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-4.0.3&auto=format&fit=crop&w=32&h=32",
@@ -144,6 +146,44 @@ export class MemStorage implements IStorage {
       updatedAt: new Date(),
     };
     this.users.set(adminUser.id, adminUser);
+
+    // Create demo moderator user
+    const modPassword = await bcrypt.hash("moderator", 10);
+    const moderatorUser: User = {
+      id: randomUUID(),
+      username: "moderator",
+      email: "moderator@projectclean.com",
+      password: modPassword,
+      firstName: "John",
+      lastName: "Smith",
+      profileImageUrl: null,
+      reputationScore: 5.0,
+      role: "moderator",
+      isActive: true,
+      isBanned: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.users.set(moderatorUser.id, moderatorUser);
+
+    // Create demo regular user
+    const userPassword = await bcrypt.hash("user", 10);
+    const regularUser: User = {
+      id: randomUUID(),
+      username: "demouser",
+      email: "user@projectclean.com",
+      password: userPassword,
+      firstName: "Alex",
+      lastName: "Chen",
+      profileImageUrl: null,
+      reputationScore: 4.5,
+      role: "user",
+      isActive: true,
+      isBanned: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.users.set(regularUser.id, regularUser);
   }
 
   // User operations
@@ -468,4 +508,9 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Export PostgreSQL storage for persistence
+import { PgStorage } from "./pgStorage";
+export const storage = new PgStorage();
+
+// Keep MemStorage for reference/testing
+// export const storage = new MemStorage();
