@@ -39,7 +39,8 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!res.ok) throw new Error('Invalid token');
           return res.json();
         })
-        .then(user => {
+        .then(json => {
+          const user = json && typeof json === 'object' && 'data' in json ? (json as any).data : json;
           setAuthState({ user, token, isAuthenticated: true });
         })
         .catch(() => {
@@ -62,9 +63,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
-      setAuthState({ user: data.user, token: data.token, isAuthenticated: true });
+      const json = await res.json();
+      const payload = json && typeof json === 'object' && 'data' in json ? (json as any).data : json;
+      const tokenFromApi = payload.token as string;
+      const userFromApi = payload.user;
+
+      if (!tokenFromApi) {
+        return false;
+      }
+
+      localStorage.setItem('auth_token', tokenFromApi);
+      setAuthState({ user: userFromApi, token: tokenFromApi, isAuthenticated: true });
       return true;
     } catch (error) {
       console.error('Login error:', error);

@@ -136,46 +136,82 @@ export default function PostCard({ post, onComment, showModerationStatus = false
               />
             </div>
           )}
+
+          {/* Video Content */}
+          {post.videoUrl && (
+            <div className="mt-4">
+              <video
+                src={post.videoUrl}
+                controls
+                className="max-w-full h-auto rounded-lg border shadow-sm max-h-96"
+                onError={(e) => {
+                  const target = e.target as HTMLVideoElement;
+                  target.style.display = 'none';
+                }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Moderation Status Info */}
-        {showModerationStatus && (
-          <div className={`p-3 rounded-lg mb-4 ${
-            post.moderationStatus === 'rejected' ? 'bg-red-50 border border-red-200' :
-            post.moderationStatus === 'flagged' ? 'bg-orange-50 border border-orange-200' :
-            post.moderationStatus === 'approved' ? 'bg-green-50 border border-green-200' :
-            'bg-yellow-50 border border-yellow-200'
-          }`}>
+        {showModerationStatus && (() => {
+          const isSpam = post.aiFlags?.includes('spam');
+          let boxClasses = '';
+          let textStrong = '';
+          let textSub = '';
+          let badgeConf = '';
+          let badgeBg = '';
+          
+          if (isSpam) {
+            boxClasses = 'bg-purple-50 border border-purple-200';
+            textStrong = 'text-purple-800';
+            textSub = 'text-purple-700';
+            badgeConf = 'bg-purple-200 text-purple-800';
+            badgeBg = 'bg-purple-600 hover:bg-purple-700 text-white border-transparent';
+          } else if (post.moderationStatus === 'rejected') {
+            boxClasses = 'bg-red-50 border border-red-200';
+            textStrong = 'text-red-800';
+            textSub = 'text-red-700';
+            badgeConf = 'bg-red-200 text-red-800';
+            badgeBg = 'bg-red-600 hover:bg-red-700 text-white border-transparent';
+          } else if (post.moderationStatus === 'flagged') {
+            boxClasses = 'bg-orange-50 border border-orange-200';
+            textStrong = 'text-orange-800';
+            textSub = 'text-orange-700';
+            badgeConf = 'bg-orange-200 text-orange-800';
+            badgeBg = 'bg-orange-500 hover:bg-orange-600 text-white border-transparent';
+          } else if (post.moderationStatus === 'approved') {
+            boxClasses = 'bg-green-50 border border-green-200';
+            textStrong = 'text-green-800';
+            textSub = 'text-green-700';
+            badgeConf = 'bg-green-200 text-green-800';
+            badgeBg = 'bg-green-600 hover:bg-green-700 text-white border-transparent';
+          } else {
+            boxClasses = 'bg-yellow-50 border border-yellow-200';
+            textStrong = 'text-yellow-800';
+            textSub = 'text-yellow-700';
+            badgeConf = 'bg-gray-200 text-gray-700';
+            badgeBg = 'bg-yellow-600 hover:bg-yellow-700 text-white border-transparent';
+          }
+
+          return (
+          <div className={`p-3 rounded-lg mb-4 ${boxClasses}`}>
             <div className="flex items-start space-x-2">
               <i className={getModerationIcon(post.moderationStatus)}></i>
               <div className="flex-1">
-                <p className={`text-sm font-medium ${
-                  post.moderationStatus === 'rejected' ? 'text-red-800' :
-                  post.moderationStatus === 'flagged' ? 'text-orange-800' :
-                  post.moderationStatus === 'approved' ? 'text-green-800' :
-                  'text-yellow-800'
-                }`}>
+                <p className={`text-sm font-medium ${textStrong}`}>
                   {getModerationMessage(post.moderationStatus)}
                 </p>
                 
                 {post.moderationReason && (
-                  <p className={`text-sm mt-1 ${
-                    post.moderationStatus === 'rejected' ? 'text-red-700' :
-                    post.moderationStatus === 'flagged' ? 'text-orange-700' :
-                    post.moderationStatus === 'approved' ? 'text-green-700' :
-                    'text-yellow-700'
-                  }`}>
+                  <p className={`text-sm mt-1 ${textSub}`}>
                     <strong>Reason:</strong> {formatModerationReason(post.moderationReason)}
                   </p>
                 )}
                 
                 <div className="flex items-center space-x-3 mt-2">
                   {post.aiConfidence && (
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      post.moderationStatus === 'rejected' ? 'bg-red-200 text-red-800' :
-                      post.moderationStatus === 'flagged' ? 'bg-orange-200 text-orange-800' :
-                      'bg-gray-200 text-gray-700'
-                    }`}>
+                    <span className={`text-xs px-2 py-1 rounded ${badgeConf}`}>
                       AI Confidence: {formatConfidenceScore(post.aiConfidence)}
                     </span>
                   )}
@@ -183,7 +219,7 @@ export default function PostCard({ post, onComment, showModerationStatus = false
                   {post.aiFlags && post.aiFlags.length > 0 && (
                     <div className="flex flex-wrap gap-1">
                       {post.aiFlags.map((flag, index) => (
-                        <Badge key={index} variant="destructive" className="text-xs">
+                        <Badge key={index} className={`text-xs ${badgeBg}`}>
                           {flag.replace('_', ' ')}
                         </Badge>
                       ))}
@@ -193,7 +229,7 @@ export default function PostCard({ post, onComment, showModerationStatus = false
               </div>
             </div>
           </div>
-        )}
+        );})()}
 
         {/* Post Actions */}
         <div className="flex items-center justify-between pt-4 border-t border-gray-100">

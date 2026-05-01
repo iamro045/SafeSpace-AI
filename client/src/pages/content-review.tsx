@@ -3,23 +3,74 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatTimeAgo, getModerationStatusColor, getContentTypeIcon, formatModerationReason, formatConfidenceScore } from "@/lib/moderation";
+import type { PendingContent, ModerationAction } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  downloadTextAsFile,
+  exportTableToPdf,
+  rowsToCsv,
+  type ExportFormat,
+} from "@/lib/export";
 
 export default function ContentReview() {
   const { toast } = useToast();
   const [selectedFilter, setSelectedFilter] = useState("all");
 
+  const handleExportRecentActions = (format: ExportFormat) => {
+    const exportedAt = new Date().toISOString();
+    const rows = (recentActions || []).map((a) => ({
+      id: a.id,
+      contentType: a.contentType,
+      action: a.action,
+      isAutomatic: a.isAutomatic,
+      confidence: typeof a.confidence === "number" ? a.confidence : "",
+      reason: a.reason || "",
+      createdAt: a.createdAt,
+    }));
+
+    const columns = ["id", "contentType", "action", "isAutomatic", "confidence", "reason", "createdAt"];
+
+    if (format === "csv") {
+      const parts = [
+        "# Moderation Actions Report",
+        `# exportedAt: ${exportedAt}`,
+        rowsToCsv(rows as any, columns).trimEnd(),
+        "",
+      ];
+      downloadTextAsFile(parts.join("\n"), "moderation-actions-report.csv", "text/csv;charset=utf-8");
+      return;
+    }
+
+    exportTableToPdf({
+      title: "Moderation Actions Report",
+      filename: "moderation-actions-report.pdf",
+      tables: [
+        {
+          headerLabel: `exportedAt: ${exportedAt}`,
+          columns,
+          rows: rows as any,
+        },
+      ],
+    });
+  };
+
   // Fetch pending content
-  const { data: pendingContent, refetch: refetchPending, isLoading } = useQuery({
+  const { data: pendingContent, refetch: refetchPending, isLoading } = useQuery<PendingContent>({
     queryKey: ['/api/moderation/pending'],
     refetchInterval: 5000, // Refresh every 5 seconds
   });
 
   // Fetch recent actions
-  const { data: recentActions } = useQuery({
+  const { data: recentActions } = useQuery<ModerationAction[]>({
     queryKey: ['/api/moderation/actions'],
     refetchInterval: 10000,
   });
@@ -56,6 +107,65 @@ export default function ContentReview() {
 
   const filteredContent = selectedFilter === "all" ? allContent : 
     allContent.filter(content => content.moderationStatus === selectedFilter);
+
+  const getAiTheme = (content: any) => {
+    const flags = content.aiFlags || [];
+    const label = content.aiDetails?.classificationLabel || "";
+    
+    if (flags.includes('spam') || label === 'spam') {
+      return {
+        bg: 'bg-purple-50',
+        border: 'border-purple-200',
+        icon: 'text-purple-600',
+        textStrong: 'text-purple-800',
+        text: 'text-purple-700',
+        badge: 'bg-purple-600 hover:bg-purple-700 text-white border-transparent'
+      };
+    }
+    
+    if (content.moderationStatus === 'flagged') {
+      return {
+        bg: 'bg-orange-50',
+        border: 'border-orange-200',
+        icon: 'text-orange-600',
+        textStrong: 'text-orange-800',
+        text: 'text-orange-700',
+        badge: 'bg-orange-500 hover:bg-orange-600 text-white border-transparent'
+      };
+    }
+
+    if (content.moderationStatus === 'approved') {
+      return {
+        bg: 'bg-green-50',
+        border: 'border-green-200',
+        icon: 'text-green-600',
+        textStrong: 'text-green-800',
+        text: 'text-green-700',
+        badge: 'bg-green-600 hover:bg-green-700 text-white border-transparent'
+      };
+    }
+
+    if (content.moderationStatus === 'pending') {
+      return {
+        bg: 'bg-yellow-50',
+        border: 'border-yellow-200',
+        icon: 'text-yellow-600',
+        textStrong: 'text-yellow-800',
+        text: 'text-yellow-700',
+        badge: 'bg-yellow-600 hover:bg-yellow-700 text-white border-transparent'
+      };
+    }
+
+    // Default to Red for rejected or general violations
+    return {
+      bg: 'bg-red-50',
+      border: 'border-red-200',
+      icon: 'text-red-600',
+      textStrong: 'text-red-800',
+      text: 'text-red-700',
+      badge: 'bg-red-600 hover:bg-red-700 text-white border-transparent'
+    };
+  };
 
   if (isLoading) {
     return (
@@ -148,14 +258,21 @@ export default function ContentReview() {
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Badge className={getModerationStatusColor(content.moderationStatus)}>
-                            {content.moderationStatus.charAt(0).toUpperCase() + content.moderationStatus.slice(1)}
-                          </Badge>
-                          {content.aiConfidence && (
-                            <Badge variant="outline">
-                              {formatConfidenceScore(content.aiConfidence)} confidence
-                            </Badge>
-                          )}
+                          {(() => {
+                            const theme = getAiTheme(content);
+                            return (
+                              <>
+                                <Badge className={getModerationStatusColor(content.moderationStatus)}>
+                                  {content.moderationStatus.charAt(0).toUpperCase() + content.moderationStatus.slice(1)}
+                                </Badge>
+                                {content.aiConfidence && (
+                                  <Badge className={theme.badge}>
+                                    {formatConfidenceScore(content.aiConfidence)} confidence
+                                  </Badge>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -176,28 +293,52 @@ export default function ContentReview() {
                       </div>
 
                       {/* AI Analysis Results */}
-                      {content.moderationReason && (
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                          <div className="flex items-start space-x-2">
-                            <i className="fas fa-exclamation-triangle text-red-600 mt-0.5"></i>
-                            <div>
-                              <p className="font-medium text-red-800">AI Detection Result</p>
-                              <p className="text-sm text-red-700 mt-1">
-                                {formatModerationReason(content.moderationReason)}
-                              </p>
-                              {content.aiFlags && content.aiFlags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {content.aiFlags.map((flag, index) => (
-                                    <Badge key={index} variant="destructive" className="text-xs">
-                                      {flag.replace('_', ' ')}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              )}
+                      {content.moderationReason && (() => {
+                        const theme = getAiTheme(content);
+                        return (
+                          <div className={`${theme.bg} border ${theme.border} rounded-lg p-3 mb-4`}>
+                            <div className="flex items-start space-x-2">
+                              <i className={`fas fa-exclamation-triangle ${theme.icon} mt-0.5`}></i>
+                              <div>
+                                <p className={`font-medium ${theme.textStrong}`}>AI Detection Result</p>
+                                <p className={`text-sm ${theme.text} mt-1`}>
+                                  {formatModerationReason(content.moderationReason)}
+                                </p>
+                                {content.aiDetails && (
+                                  <div className={`text-xs ${theme.text} mt-2 space-y-1`}>
+                                    {content.aiDetails.classificationLabel && (
+                                      <p>
+                                        Label: <span className="font-medium">{content.aiDetails.classificationLabel}</span>
+                                        {typeof content.aiDetails.severityScore === 'number' && (
+                                          <span> • Severity {(content.aiDetails.severityScore * 100).toFixed(0)}%</span>
+                                        )}
+                                      </p>
+                                    )}
+                                    {Array.isArray(content.aiDetails.contributingTerms) && content.aiDetails.contributingTerms.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {content.aiDetails.contributingTerms.slice(0, 8).map((t: string, idx: number) => (
+                                          <Badge key={`${t}-${idx}`} variant="outline" className={`text-[10px] ${theme.text}`}>
+                                            {t}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {content.aiFlags && content.aiFlags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {content.aiFlags.map((flag: string, index: number) => (
+                                      <Badge key={index} className={`text-xs ${theme.badge}`}>
+                                        {flag.replace('_', ' ')}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Additional Context */}
                       {content.type === 'comment' && content.post && (
@@ -215,7 +356,7 @@ export default function ContentReview() {
                             Language: {content.language.toUpperCase()}
                           </Badge>
                         )}
-                        {content.contentType && content.type === 'post' && (
+                        {content.type === 'post' && content.contentType && (
                           <Badge variant="outline">
                             Type: {content.contentType}
                           </Badge>
@@ -265,10 +406,22 @@ export default function ContentReview() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Recent Moderation Actions
-              <Button variant="outline" size="sm">
-                <i className="fas fa-download mr-2"></i>
-                Export Report
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" data-testid="button-export-content-review-actions">
+                    <i className="fas fa-download mr-2"></i>
+                    Export Report
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExportRecentActions("csv")}>
+                    Download CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExportRecentActions("pdf")}>
+                    Download PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardTitle>
           </CardHeader>
           <CardContent>

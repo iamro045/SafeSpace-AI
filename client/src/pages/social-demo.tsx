@@ -8,30 +8,48 @@ import CreatePost from "@/components/social/create-post";
 import PostCard from "@/components/social/post-card";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import type { Post } from "@/lib/types";
 
 export default function SocialDemo() {
   const { toast } = useToast();
   const [selectedTab, setSelectedTab] = useState("feed");
 
   // Fetch posts for the demo
-  const { data: posts, refetch: refetchPosts, isLoading } = useQuery({
+    const { data: posts, refetch: refetchPosts, isLoading } = useQuery<Post[]>({
     queryKey: ['/api/posts'],
     refetchInterval: 10000, // Refresh every 10 seconds to show live moderation
   });
 
   // Handle post creation
-  const handleCreatePost = async (content: string, contentType: string, imageUrl?: string) => {
+  const handleCreatePost = async (content: string, contentType: string, imageUrl: string | undefined, videoUrl: string | undefined, language: string) => {
     try {
-      await apiRequest('POST', '/api/posts', {
+      const res = await apiRequest('POST', '/api/posts', {
         content,
         contentType,
         imageUrl,
-        language: 'en'
+        videoUrl,
+        language,
       });
+
+      let decisionSummary = "Your post has been submitted for review.";
+      try {
+        const json = await res.json();
+        const data = json?.data ?? json;
+        const post = data?.post;
+        if (post?.moderationStatus === "approved") {
+          decisionSummary = post?.moderationReason ? post.moderationReason : "Post approved.";
+        } else if (post?.moderationStatus === "flagged") {
+          decisionSummary = post?.moderationReason || "Post flagged for admin review.";
+        } else if (post?.moderationStatus === "rejected") {
+          decisionSummary = post?.moderationReason || "Post blocked by moderation.";
+        }
+      } catch {
+        // ignore
+      }
 
       toast({
         title: "Post created",
-        description: "Your post has been submitted for review.",
+        description: decisionSummary,
       });
 
       refetchPosts();
@@ -47,14 +65,30 @@ export default function SocialDemo() {
   // Handle comment creation
   const handleCreateComment = async (postId: string, content: string) => {
     try {
-      await apiRequest('POST', `/api/posts/${postId}/comments`, {
+      const res = await apiRequest('POST', `/api/posts/${postId}/comments`, {
         content,
         language: 'en'
       });
 
+      let decisionSummary = "Your comment has been submitted for review.";
+      try {
+        const json = await res.json();
+        const data = json?.data ?? json;
+        const decision = data?.decision;
+        if (decision?.moderationStatus === "approved") {
+          decisionSummary = decision?.moderationReason || "Comment approved.";
+        } else if (decision?.moderationStatus === "flagged") {
+          decisionSummary = decision?.moderationReason || "Comment flagged for review.";
+        } else if (decision?.moderationStatus === "rejected") {
+          decisionSummary = decision?.moderationReason || "Comment blocked.";
+        }
+      } catch {
+        // ignore
+      }
+
       toast({
         title: "Comment added",
-        description: "Your comment has been submitted for review.",
+        description: decisionSummary,
       });
 
       refetchPosts();

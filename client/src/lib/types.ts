@@ -30,6 +30,20 @@ export interface Post {
   updatedAt: string;
   user?: User;
   commentCount?: number;
+  comments?: Comment[];
+  aiDetails?: {
+    actionId: string;
+    isAutomatic: boolean;
+    aiModel?: string | null;
+    confidence?: number | null;
+    reason?: string | null;
+    createdAt?: string;
+    classificationLabel?: string;
+    severityScore?: number;
+    detectedLanguage?: string;
+    contributingTerms?: string[];
+    violationType?: string[];
+  } | null;
 }
 
 export interface Comment {
@@ -47,6 +61,20 @@ export interface Comment {
   updatedAt: string;
   user?: User;
   post?: Post;
+  aiDetails?: Post["aiDetails"];
+}
+
+export interface AbuseLexicon {
+  blockTerms: string[];
+  reviewTerms: string[];
+  updatedAt: string;
+}
+
+export interface TextModelVersionInfo {
+  version: string;
+  fileName: string;
+  trainedAt?: string;
+  vocabularySize?: number;
 }
 
 export interface ModerationAction {
@@ -110,4 +138,37 @@ export interface DashboardAnalytics {
     count: number;
     percentage: number;
   }>;
+}
+
+export interface AppConfigResponse {
+  content: {
+    textCharLimit: number;
+    commentCharLimit: number;
+  };
+  uploads: {
+    maxImageBytes: number;
+    allowedImageMimeTypes: string[];
+  };
+  moderation: Record<string, any>;
+  reputation: Record<string, any>;
+}
+
+export interface DatasetMetadata {
+  id: string;
+  name: string;
+  uploadedAt: string;
+  rowCount: number;
+  labelCounts: Record<string, number>;
+  languages: string[];
+  originalFilename: string;
+}
+
+export interface TrainTextModelResult {
+  modelVersion: string;
+  trainedAt: string;
+  rowCount: number;
+  labelCounts: Record<string, number>;
+  vocabularySize: number;
+  holdoutAccuracy: number;
+  dataset: DatasetMetadata;
 }

@@ -1,0 +1,173 @@
+[
+  {
+    "id": "ds_1770928847980",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:47.980Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770928818635-e80d512075ff4.csv"
+  },
+  {
+    "id": "ds_1770928842790",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:42.790Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770928813587-abbff651e74cf.csv"
+  },
+  {
+    "id": "ds_1770928838992",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:38.992Z",
+    "rowCount": 1653,
+    "labelCounts": {
+      "abusive_language": 157,
+      "clean": 873,
+      "hate_speech": 234,
+      "spam": 289,
+      "harassment": 100
+    },
+    "languages": [
+      "hi"
+    ],
+    "originalFilename": "dataset-1770927093401-f4b59e46d84ce.csv"
+  },
+  {
+    "id": "ds_1770928834833",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:34.833Z",
+    "rowCount": 1653,
+    "labelCounts": {
+      "abusive_language": 157,
+      "clean": 873,
+      "hate_speech": 234,
+      "spam": 289,
+      "harassment": 100
+    },
+    "languages": [
+      "hi"
+    ],
+    "originalFilename": "dataset-1770926225902-49af52dd3cfc5.csv"
+  },
+  {
+    "id": "ds_1770928831010",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:31.010Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770922443866-ce743b2267ad4.csv"
+  },
+  {
+    "id": "ds_1770928824681",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:24.681Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770922063218-1aeaab87ee914.csv"
+  },
+  {
+    "id": "ds_1770928818875",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:18.875Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770921828271-8a0a5f056e08d.csv"
+  },
+  {
+    "id": "ds_1770928813854",
+    "name": "dataset-1770921583693-5317d08a499ff",
+    "uploadedAt": "2026-02-12T20:40:13.854Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "dataset-1770921583693-5317d08a499ff.csv"
+  },
+  {
+    "id": "ds_1770927093466",
+    "name": "Hatespeech-Hindi_Test",
+    "uploadedAt": "2026-02-12T20:11:33.466Z",
+    "rowCount": 1653,
+    "labelCounts": {
+      "abusive_language": 157,
+      "clean": 873,
+      "hate_speech": 234,
+      "spam": 289,
+      "harassment": 100
+    },
+    "languages": [
+      "hi"
+    ],
+    "originalFilename": "Hatespeech-Hindi_Test.csv"
+  },
+  {
+    "id": "ds_1770926805961",
+    "name": "combined_hate_speech_dataset",
+    "uploadedAt": "2026-02-12T20:06:45.961Z",
+    "rowCount": 29550,
+    "labelCounts": {
+      "clean": 15825,
+      "hate_speech": 13725
+    },
+    "languages": [
+      "en",
+      "hi"
+    ],
+    "originalFilename": "combined_hate_speech_dataset.csv"
+  },
+  {
+    "id": "ds_1770922444174",
+    "name": "labeled_data",
+    "uploadedAt": "2026-02-12T18:54:04.174Z",
+    "rowCount": 24783,
+    "labelCounts": {
+      "clean": 4163,
+      "abusive_language": 19190,
+      "hate_speech": 1430
+    },
+    "languages": [
+      "en"
+    ],
+    "originalFilename": "labeled_data.csv"
+  }
+]

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,24 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import type { AIModelStatus, AbuseLexicon, DatasetMetadata, TextModelVersionInfo, TrainTextModelResult } from "@/lib/types";
+import {
+  downloadTextAsFile,
+  exportTableToPdf,
+  keyValueToRows,
+  parseCsvToTable,
+  rowsToCsv,
+  type ExportFormat,
+} from "@/lib/export";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -19,15 +36,62 @@ export default function Settings() {
     realTimeProcessing: true,
   });
 
+  const [datasetName, setDatasetName] = useState("");
+  const [datasetFile, setDatasetFile] = useState<File | null>(null);
+  const [isTraining, setIsTraining] = useState(false);
+  const [lastTrainResult, setLastTrainResult] = useState<TrainTextModelResult | null>(null);
+
+  const [blockTermsText, setBlockTermsText] = useState("");
+  const [reviewTermsText, setReviewTermsText] = useState("");
+  const [selectedTextModelVersion, setSelectedTextModelVersion] = useState<string>("");
+
   // Fetch AI model status
-  const { data: aiModels } = useQuery({
+  const { data: aiModels } = useQuery<AIModelStatus[]>({
     queryKey: ['/api/ai/models'],
   });
 
+  const { data: textDatasets } = useQuery<DatasetMetadata[]>({
+    queryKey: ['/api/datasets/text'],
+  });
+
   // Fetch reputation config
-  const { data: reputationConfig } = useQuery({
+  const { data: reputationConfig } = useQuery<any>({
     queryKey: ['/api/reputation/config'],
   });
+
+  const { data: lexicon } = useQuery<AbuseLexicon>({
+    queryKey: ['/api/moderation/lexicon'],
+  });
+
+  const { data: textModels } = useQuery<TextModelVersionInfo[]>({
+    queryKey: ['/api/ai/text-models'],
+  });
+
+  useEffect(() => {
+    if (!lexicon) return;
+    setBlockTermsText((lexicon.blockTerms || []).join("\n"));
+    setReviewTermsText((lexicon.reviewTerms || []).join("\n"));
+  }, [lexicon]);
+
+  useEffect(() => {
+    if (selectedTextModelVersion) return;
+    if (textModels && textModels.length > 0) {
+      setSelectedTextModelVersion(textModels[0].version);
+    }
+  }, [textModels, selectedTextModelVersion]);
+
+  const parseTerms = (text: string) => {
+    return text
+      .split(/\r?\n/g)
+      .map((t) => t.trim())
+      .filter(Boolean);
+  };
+
+  const lexiconStats = useMemo(() => {
+    const block = parseTerms(blockTermsText).length;
+    const review = parseTerms(reviewTermsText).length;
+    return { block, review };
+  }, [blockTermsText, reviewTermsText]);
 
   const handleAiSettingChange = (key: string, value: any) => {
     setAiSettings(prev => ({
@@ -45,16 +109,194 @@ export default function Settings() {
 
   const handleRunHealthCheck = async (modelName: string) => {
     try {
-      // Simulate health check - in real app this would call the API
+      const res = await apiRequest('POST', '/api/ai/health-check', { modelName });
+      const json = await res.json();
+      const data = (json && typeof json === 'object' && 'data' in json) ? (json as any).data : json;
+
+      await queryClient.invalidateQueries({ queryKey: ['/api/ai/models'] });
+
       toast({
         title: "Health check completed",
-        description: `${modelName} is running normally.`,
+        description: `${modelName}: ${data.status}${data.message ? ` - ${data.message}` : ''}`,
       });
     } catch (error) {
       toast({
         title: "Health check failed",
         description: `Error checking ${modelName} status.`,
         variant: "destructive",
+      });
+    }
+  };
+
+  const handleTrainTextModel = async () => {
+    if (!datasetFile) {
+      toast({
+        title: "Dataset required",
+        description: "Please choose a CSV file before training.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsTraining(true);
+      const token = localStorage.getItem("auth_token");
+      const form = new FormData();
+      form.append("dataset", datasetFile);
+      if (datasetName.trim()) {
+        form.append("datasetName", datasetName.trim());
+      }
+
+      const res = await fetch("/api/ai/train/text", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Training failed");
+      }
+
+      const json = await res.json();
+      const data = (json && typeof json === "object" && "data" in json) ? (json as any).data : json;
+      setLastTrainResult(data as TrainTextModelResult);
+
+      toast({
+        title: "Training complete",
+        description: `Text model v${data.modelVersion} trained (accuracy ${(data.holdoutAccuracy * 100).toFixed(1)}%).`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['/api/ai/models'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/datasets/text'] });
+    } catch (error: any) {
+      toast({
+        title: "Training failed",
+        description: error?.message || "Unable to train text model.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const handleSaveLexicon = async () => {
+    try {
+      const blockTerms = parseTerms(blockTermsText);
+      const reviewTerms = parseTerms(reviewTermsText);
+
+      await apiRequest('PUT', '/api/moderation/lexicon', { blockTerms, reviewTerms });
+      await queryClient.invalidateQueries({ queryKey: ['/api/moderation/lexicon'] });
+
+      toast({
+        title: 'Lexicon updated',
+        description: `Saved ${blockTerms.length} block terms and ${reviewTerms.length} review terms.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Failed to update lexicon',
+        description: error?.message || 'Unable to save lexicon.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDownloadManualTrainingExport = async (format: ExportFormat) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('/api/moderation/training/export-text', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Export failed');
+      }
+
+      const csvText = await res.text();
+
+      if (format === "csv") {
+        downloadTextAsFile(csvText, 'manual-review-training-text.csv', 'text/csv;charset=utf-8');
+        return;
+      }
+
+      const { columns, rows } = parseCsvToTable(csvText);
+      exportTableToPdf({
+        title: "Manual Review Training Export",
+        filename: "manual-review-training-text.pdf",
+        tables: [
+          {
+            columns,
+            rows,
+          },
+        ],
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Export failed',
+        description: error?.message || 'Unable to export training dataset.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleExportConfiguration = async (format: ExportFormat) => {
+    try {
+      const exportedAt = new Date().toISOString();
+      const configObj = {
+        exportedAt,
+        aiSettings,
+        textModelVersionActive: selectedTextModelVersion || null,
+        lexicon: {
+          blockTerms: parseTerms(blockTermsText),
+          reviewTerms: parseTerms(reviewTermsText),
+        },
+        reputationConfig: reputationConfig || null,
+      };
+
+      const rows = keyValueToRows(configObj);
+      const columns = ["key", "value"];
+
+      if (format === "csv") {
+        const csv = rowsToCsv(rows, columns);
+        downloadTextAsFile(csv, "system-configuration.csv", "text/csv;charset=utf-8");
+        return;
+      }
+
+      exportTableToPdf({
+        title: "System Configuration Export",
+        filename: "system-configuration.pdf",
+        tables: [
+          {
+            headerLabel: "Key / Value",
+            columns,
+            rows,
+          },
+        ],
+      });
+    } catch (error: any) {
+      toast({
+        title: "Export failed",
+        description: error?.message || "Unable to export configuration.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleActivateTextModel = async () => {
+    if (!selectedTextModelVersion) return;
+    try {
+      await apiRequest('POST', '/api/ai/text-models/activate', { modelVersion: selectedTextModelVersion });
+      await queryClient.invalidateQueries({ queryKey: ['/api/ai/models'] });
+      toast({
+        title: 'Text model activated',
+        description: `Now using v${selectedTextModelVersion}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Activation failed',
+        description: error?.message || 'Unable to activate selected model.',
+        variant: 'destructive',
       });
     }
   };
@@ -168,7 +410,7 @@ export default function Settings() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {aiModels?.map((model) => (
+                  {aiModels?.map((model: AIModelStatus) => (
                     <div key={model.id} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center space-x-4">
                         <div className={`w-3 h-3 rounded-full ${
@@ -210,6 +452,143 @@ export default function Settings() {
                     </div>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Text Dataset & Training */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Text Datasets & Training</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-3">
+                  <Label htmlFor="dataset-file">Upload CSV Dataset</Label>
+                  <Input
+                    id="dataset-file"
+                    type="file"
+                    accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setDatasetFile(file);
+                      if (file && !datasetName) {
+                        setDatasetName(file.name.replace(/\.csv$/i, ""));
+                      }
+                    }}
+                    data-testid="input-dataset-file"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Supported schemas include: <code>text</code> + <code>label</code> (optional <code>language</code>),
+                    <code>text</code> + <code>hate_label</code> (0/1), <code>tweet</code> + <code>class</code> (0/1/2),
+                    and <code>Post</code> + <code>Labels Set</code>.
+                  </p>
+                </div>
+
+                <div>
+                  <Label htmlFor="dataset-name">Dataset Name</Label>
+                  <Input
+                    id="dataset-name"
+                    value={datasetName}
+                    onChange={(e) => setDatasetName(e.target.value)}
+                    placeholder="e.g. Kaggle Toxic Comments v1"
+                    className="mt-1"
+                    data-testid="input-dataset-name"
+                  />
+                </div>
+
+                <Button
+                  onClick={handleTrainTextModel}
+                  disabled={isTraining || !datasetFile}
+                  className="w-full"
+                  data-testid="button-train-text-model"
+                >
+                  <i className="fas fa-brain mr-2"></i>
+                  {isTraining ? "Training..." : "Train Text Model"}
+                </Button>
+
+                {lastTrainResult && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                    <p className="font-semibold mb-1">
+                      Latest training: v{lastTrainResult.modelVersion} ·
+                      accuracy {(lastTrainResult.holdoutAccuracy * 100).toFixed(1)}%
+                    </p>
+                    <p>
+                      {lastTrainResult.rowCount} rows · vocabulary {lastTrainResult.vocabularySize} tokens
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Label>Recent Datasets</Label>
+                    <span className="text-xs text-gray-500">
+                      {textDatasets?.length || 0} uploaded
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {textDatasets?.length ? (
+                      textDatasets.map((ds) => (
+                        <div key={ds.id} className="border rounded-md p-2 text-xs flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium truncate" title={ds.name}>{ds.name}</span>
+                            <span className="text-gray-500">
+                              {new Date(ds.uploadedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(ds.labelCounts).map(([label, count]) => (
+                              <Badge key={label} variant="outline" className="text-[10px]">
+                                {label}: {count}
+                              </Badge>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-between text-gray-500">
+                            <span>Rows: {ds.rowCount}</span>
+                            <span>Lang: {ds.languages.join(", ")}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-gray-500">No datasets uploaded yet.</p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Text Model Versions */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Text Model Versions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Roll back to an older model by activating a previous version.
+                </p>
+                {textModels && textModels.length > 0 ? (
+                  <>
+                    <Label htmlFor="text-model-version">Select Version</Label>
+                    <select
+                      id="text-model-version"
+                      aria-label="Text model version"
+                      className="w-full rounded-md border px-3 py-2 text-sm"
+                      value={selectedTextModelVersion}
+                      onChange={(e) => setSelectedTextModelVersion(e.target.value)}
+                      data-testid="select-text-model-version"
+                    >
+                      {textModels.map((m) => (
+                        <option key={m.version} value={m.version}>
+                          v{m.version}{m.trainedAt ? ` • ${new Date(m.trainedAt).toLocaleString()}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <Button onClick={handleActivateTextModel} className="w-full" data-testid="button-activate-text-model">
+                      <i className="fas fa-rotate-left mr-2"></i>
+                      Activate Selected Model
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">No trained models found yet.</p>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -317,6 +696,69 @@ export default function Settings() {
                       </Label>
                     </div>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Abuse Lexicon */}
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle>Abuse Lexicon</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-gray-600">
+                  Terms in <strong>Block</strong> are immediately rejected. Terms in <strong>Review</strong> are flagged.
+                  Matching includes basic normalization to catch spacing/punctuation/repeat-character bypasses.
+                </p>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="lexicon-block">Block terms</Label>
+                    <Textarea
+                      id="lexicon-block"
+                      value={blockTermsText}
+                      onChange={(e) => setBlockTermsText(e.target.value)}
+                      rows={8}
+                      placeholder="One term per line"
+                      data-testid="textarea-lexicon-block"
+                    />
+                    <p className="text-xs text-gray-500">{lexiconStats.block} terms</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="lexicon-review">Review terms</Label>
+                    <Textarea
+                      id="lexicon-review"
+                      value={reviewTermsText}
+                      onChange={(e) => setReviewTermsText(e.target.value)}
+                      rows={8}
+                      placeholder="One term per line"
+                      data-testid="textarea-lexicon-review"
+                    />
+                    <p className="text-xs text-gray-500">{lexiconStats.review} terms</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                  <Button onClick={handleSaveLexicon} data-testid="button-save-lexicon">
+                    <i className="fas fa-save mr-2"></i>
+                    Save Lexicon
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" data-testid="button-export-manual-training">
+                        <i className="fas fa-download mr-2"></i>
+                        Export Manual Reviews
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleDownloadManualTrainingExport("csv")}>
+                        Download CSV
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDownloadManualTrainingExport("pdf")}>
+                        Download PDF
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -591,10 +1033,22 @@ export default function Settings() {
                 <div>
                   <Label>Export & Backup</Label>
                   <div className="space-y-3 mt-3">
-                    <Button variant="outline" className="w-full" data-testid="button-export-settings">
-                      <i className="fas fa-download mr-2"></i>
-                      Export Configuration
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="w-full" data-testid="button-export-settings">
+                          <i className="fas fa-download mr-2"></i>
+                          Export Configuration
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleExportConfiguration("csv")}>
+                          Download CSV
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleExportConfiguration("pdf")}>
+                          Download PDF
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button variant="outline" className="w-full" data-testid="button-backup-data">
                       <i className="fas fa-database mr-2"></i>
                       Backup Data

@@ -1,4 +1,6 @@
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import type { PendingContent } from "@/lib/types";
 
 interface SidebarProps {
   user: any;
@@ -7,9 +9,16 @@ interface SidebarProps {
 export default function Sidebar({ user }: SidebarProps) {
   const [location] = useLocation();
 
+  const { data: pending } = useQuery<PendingContent>({
+    queryKey: ["/api/moderation/pending"],
+    refetchInterval: 5000,
+  });
+
+  const pendingCount = (pending?.posts?.length || 0) + (pending?.comments?.length || 0);
+
   const navigationItems = [
     { path: '/', label: 'Dashboard', icon: 'fas fa-chart-line' },
-    { path: '/content-review', label: 'Content Review', icon: 'fas fa-flag', badge: '24' },
+    { path: '/content-review', label: 'Content Review', icon: 'fas fa-flag' },
     { path: '/users', label: 'User Management', icon: 'fas fa-users' },
     { path: '/analytics', label: 'Analytics', icon: 'fas fa-chart-bar' },
     { path: '/social-demo', label: 'Social Demo', icon: 'fas fa-share-alt' },
@@ -44,7 +53,7 @@ export default function Sidebar({ user }: SidebarProps) {
             <i className="fas fa-shield-alt text-white text-lg"></i>
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Project Clean</h1>
+            <h1 className="text-xl font-bold text-gray-900">SafeSpace AI</h1>
             <p className="text-sm text-gray-500">Content Moderation</p>
           </div>
         </div>
@@ -68,9 +77,9 @@ export default function Sidebar({ user }: SidebarProps) {
               >
                 <i className={`${item.icon} w-5`}></i>
                 <span>{item.label}</span>
-                {item.badge && (
+                {item.path === "/content-review" && pendingCount > 0 && (
                   <span className="ml-auto bg-orange-500 text-white text-xs px-2 py-1 rounded-full">
-                    {item.badge}
+                    {pendingCount}
                   </span>
                 )}
               </Link>

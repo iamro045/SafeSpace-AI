@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import type { User, ReputationInsights } from "@/lib/types";
 import { getReputationColor, getReputationLabel, formatTimeAgo } from "@/lib/moderation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,12 +17,12 @@ export default function Users() {
   const [selectedFilter, setSelectedFilter] = useState("all");
 
   // Fetch users
-  const { data: users, refetch: refetchUsers, isLoading } = useQuery({
+  const { data: users, refetch: refetchUsers, isLoading } = useQuery<User[]>({
     queryKey: ['/api/users'],
   });
 
   // Fetch reputation insights
-  const { data: reputationInsights } = useQuery({
+  const { data: reputationInsights } = useQuery<ReputationInsights>({
     queryKey: ['/api/reputation/insights'],
   });
 

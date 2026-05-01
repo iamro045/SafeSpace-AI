@@ -60,12 +60,62 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
+  const requestedPort = parseInt(process.env.PORT || "5000", 10);
+
+  const baseListenOptions: {
+    host: string;
+    reusePort?: boolean;
+  } = {
     host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-  });
+  };
+
+  // `reusePort` is not supported on Windows and throws ENOTSUP.
+  if (process.platform !== "win32") {
+    baseListenOptions.reusePort = true;
+  }
+
+  const tryListen = async (port: number): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      const onError = (err: any) => {
+        cleanup();
+        reject(err);
+      };
+      const onListening = () => {
+        cleanup();
+        resolve(port);
+      };
+      const cleanup = () => {
+        server.off("error", onError);
+        server.off("listening", onListening);
+      };
+
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen({ ...baseListenOptions, port });
+    });
+  };
+
+  let boundPort: number | null = null;
+  let lastError: any = null;
+
+  for (let offset = 0; offset <= 20; offset++) {
+    const port = requestedPort + offset;
+    try {
+      boundPort = await tryListen(port);
+      break;
+    } catch (err: any) {
+      lastError = err;
+      if (err?.code !== "EADDRINUSE") throw err;
+    }
+  }
+
+  if (boundPort === null) {
+    throw lastError || new Error(`Failed to bind to port ${requestedPort}`);
+  }
+
+  if (boundPort !== requestedPort) {
+    log(`port ${requestedPort} in use; serving on port ${boundPort}`);
+  } else {
+    log(`serving on port ${boundPort}`);
+  }
 })();

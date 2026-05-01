@@ -128,14 +128,16 @@ export function formatTimeAgo(dateString: string): string {
 }
 
 export function isHighRiskContent(content: Post | Comment): boolean {
-  return (
-    content.moderationStatus === 'flagged' && 
-    content.aiConfidence !== null && 
-    content.aiConfidence > 0.8
-  ) || (
-    content.aiFlags && 
-    content.aiFlags.some(flag => ['hate_speech', 'nudity', 'violence'].includes(flag))
+  const aiConfidence = content.aiConfidence ?? 0;
+  const hasHighConfidenceFlag =
+    content.moderationStatus === 'flagged' && aiConfidence > 0.8;
+
+  const flags = content.aiFlags ?? [];
+  const hasSevereFlag = flags.some((flag) =>
+    ['hate_speech', 'nudity', 'violence'].includes(flag)
   );
+
+  return hasHighConfidenceFlag || hasSevereFlag;
 }
 
 export function shouldAutoBlock(confidence: number, violationTypes: string[]): boolean {

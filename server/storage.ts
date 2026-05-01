@@ -53,6 +53,7 @@ export interface IStorage {
   createModerationAction(action: InsertModerationAction): Promise<ModerationAction>;
   getModerationActions(limit?: number): Promise<ModerationAction[]>;
   getModerationActionsByModerator(moderatorId: string): Promise<ModerationAction[]>;
+  getLatestModerationActionForContent(contentId: string, contentType: "post" | "comment"): Promise<ModerationAction | undefined>;
 
   // Reputation operations
   createReputationHistory(history: InsertReputationHistory): Promise<ReputationHistory>;
@@ -61,6 +62,7 @@ export interface IStorage {
   // AI Model operations
   getAIModelStatus(): Promise<AIModelStatus[]>;
   updateAIModelStatus(modelName: string, status: string, errorMessage?: string): Promise<void>;
+  updateAIModelInfo(modelName: string, updates: { status?: string; errorMessage?: string | null; version?: string | null; configuration?: any }): Promise<void>;
 
   // Content reports
   createContentReport(report: InsertContentReport): Promise<ContentReport>;
@@ -399,6 +401,20 @@ export class MemStorage implements IStorage {
       .slice(0, limit);
   }
 
+  async getLatestModerationActionForContent(
+    contentId: string,
+    contentType: "post" | "comment"
+  ): Promise<ModerationAction | undefined> {
+    const all = Array.from(this.moderationActions.values())
+      .filter((a) => a.contentId === contentId && a.contentType === contentType)
+      .sort((a, b) => {
+        const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return bt - at;
+      });
+    return all[0];
+  }
+
   async getModerationActionsByModerator(moderatorId: string): Promise<ModerationAction[]> {
     return Array.from(this.moderationActions.values())
       .filter(action => action.moderatorId === moderatorId)
@@ -437,6 +453,21 @@ export class MemStorage implements IStorage {
       ...model,
       status,
       errorMessage: errorMessage || null,
+      lastHealthCheck: new Date(),
+    };
+    this.aiModelStatuses.set(modelName, updatedModel);
+  }
+
+  async updateAIModelInfo(modelName: string, updates: { status?: string; errorMessage?: string | null; version?: string | null; configuration?: any }): Promise<void> {
+    const model = this.aiModelStatuses.get(modelName);
+    if (!model) return;
+
+    const updatedModel = {
+      ...model,
+      status: updates.status ?? model.status,
+      errorMessage: updates.errorMessage !== undefined ? updates.errorMessage : model.errorMessage,
+      version: updates.version !== undefined ? updates.version : model.version,
+      configuration: updates.configuration !== undefined ? updates.configuration : model.configuration,
       lastHealthCheck: new Date(),
     };
     this.aiModelStatuses.set(modelName, updatedModel);

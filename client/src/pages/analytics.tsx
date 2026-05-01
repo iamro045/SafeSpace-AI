@@ -3,27 +3,80 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import StatsCard from "@/components/analytics/stats-card";
 import DetectionInsights from "@/components/analytics/detection-insights";
+import type { DashboardAnalytics, ModerationAction } from "@/lib/types";
+import {
+  downloadTextAsFile,
+  exportTableToPdf,
+  rowsToCsv,
+  type ExportFormat,
+} from "@/lib/export";
 
 export default function Analytics() {
+  const widthClassFromPercent = (pct: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    const step = Math.round(clamped / 5) * 5;
+    const map: Record<number, string> = {
+      0: "w-0",
+      5: "w-[5%]",
+      10: "w-[10%]",
+      15: "w-[15%]",
+      20: "w-[20%]",
+      25: "w-1/4",
+      30: "w-[30%]",
+      35: "w-[35%]",
+      40: "w-2/5",
+      45: "w-[45%]",
+      50: "w-1/2",
+      55: "w-[55%]",
+      60: "w-3/5",
+      65: "w-[65%]",
+      70: "w-[70%]",
+      75: "w-3/4",
+      80: "w-4/5",
+      85: "w-[85%]",
+      90: "w-[90%]",
+      95: "w-[95%]",
+      100: "w-full",
+    };
+    return map[step] || "w-full";
+  };
+
+  const barHeights = [
+    "h-6",
+    "h-8",
+    "h-10",
+    "h-12",
+    "h-14",
+    "h-16",
+    "h-18",
+    "h-20",
+  ] as const;
+
   // Fetch dashboard analytics
-  const { data: analytics, isLoading } = useQuery({
+  const { data: analytics, isLoading } = useQuery<DashboardAnalytics>({
     queryKey: ['/api/analytics/dashboard'],
   });
 
   // Fetch moderation actions
-  const { data: actions } = useQuery({
+  const { data: actions } = useQuery<ModerationAction[]>({
     queryKey: ['/api/moderation/actions'],
   });
 
   if (isLoading) {
     return (
-      <div className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
+              <CardContent className="p-4">
                 <div className="h-4 bg-gray-200 rounded mb-2"></div>
                 <div className="h-8 bg-gray-200 rounded mb-2"></div>
                 <div className="h-4 bg-gray-200 rounded w-1/2"></div>
@@ -45,19 +98,97 @@ export default function Analytics() {
   const detectionInsights = analytics?.detectionInsights || [];
   const languageDistribution = analytics?.languageDistribution || { en: 70, hi: 20, ta: 5, other: 5 };
 
+  const handleExportReport = (format: ExportFormat) => {
+    const exportedAt = new Date().toISOString();
+
+    const statsRows = [
+      { metric: "totalProcessed", value: stats.totalProcessed },
+      { metric: "totalFlagged", value: stats.totalFlagged },
+      { metric: "totalBlocked", value: stats.totalBlocked },
+      { metric: "activeUsers", value: stats.activeUsers },
+      { metric: "exportedAt", value: exportedAt },
+    ];
+
+    const insightRows = detectionInsights.map((i: any) => ({
+      type: i.type,
+      count: i.count,
+      percentage: i.percentage,
+    }));
+
+    const actionRows = (actions || []).map((a) => ({
+      id: a.id,
+      contentType: a.contentType,
+      action: a.action,
+      isAutomatic: a.isAutomatic,
+      confidence: typeof a.confidence === "number" ? a.confidence : "",
+      createdAt: a.createdAt,
+    }));
+
+    if (format === "csv") {
+      const parts = [
+        "# Analytics Report",
+        "# Stats",
+        rowsToCsv(statsRows as any, ["metric", "value"]).trimEnd(),
+        "",
+        "# Detection Insights",
+        rowsToCsv(insightRows as any, ["type", "count", "percentage"]).trimEnd(),
+        "",
+        "# Moderation Actions",
+        rowsToCsv(actionRows as any, ["id", "contentType", "action", "isAutomatic", "confidence", "createdAt"]).trimEnd(),
+        "",
+      ];
+      downloadTextAsFile(parts.join("\n"), "analytics-report.csv", "text/csv;charset=utf-8");
+      return;
+    }
+
+    exportTableToPdf({
+      title: "Analytics Report",
+      filename: "analytics-report.pdf",
+      tables: [
+        {
+          headerLabel: "Stats",
+          columns: ["metric", "value"],
+          rows: statsRows as any,
+        },
+        {
+          headerLabel: "Detection Insights",
+          columns: ["type", "count", "percentage"],
+          rows: insightRows as any,
+        },
+        {
+          headerLabel: "Moderation Actions",
+          columns: ["id", "contentType", "action", "isAutomatic", "confidence", "createdAt"],
+          rows: actionRows as any,
+        },
+      ],
+    });
+  };
+
   return (
-    <div className="p-6">
+    <div className="p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Analytics & Reports</h1>
           <p className="text-gray-600">Comprehensive analytics and insights for content moderation</p>
         </div>
         <div className="flex space-x-2">
-          <Button variant="outline" data-testid="button-export-analytics">
-            <i className="fas fa-download mr-2"></i>
-            Export Report
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" data-testid="button-export-analytics">
+                <i className="fas fa-download mr-2"></i>
+                Export Report
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExportReport("csv")}>
+                Download CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExportReport("pdf")}>
+                Download PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" data-testid="button-refresh-data">
             <i className="fas fa-sync mr-2"></i>
             Refresh
@@ -66,7 +197,7 @@ export default function Analytics() {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatsCard
           title="Total Content Processed"
           value={stats.totalProcessed}
@@ -106,8 +237,8 @@ export default function Analytics() {
           <TabsTrigger value="trends" data-testid="tab-trends">Trends</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TabsContent value="overview" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <DetectionInsights
               insights={detectionInsights}
               languageDistribution={languageDistribution}
@@ -119,9 +250,9 @@ export default function Analytics() {
                 <CardTitle>Moderation Activity Timeline</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4 max-h-96 overflow-y-auto">
+                <div className="space-y-3 max-h-80 overflow-y-auto">
                   {actions?.slice(0, 10).map((action, index) => (
-                    <div key={action.id} className="flex items-center space-x-4 p-3 bg-gray-50 rounded-lg">
+                    <div key={action.id} className="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg">
                       <div className={`w-3 h-3 rounded-full ${
                         action.action === 'approve' ? 'bg-green-500' :
                         action.action === 'reject' ? 'bg-red-500' : 'bg-orange-500'
@@ -150,8 +281,8 @@ export default function Analytics() {
           </div>
         </TabsContent>
 
-        <TabsContent value="ai-performance" className="mt-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TabsContent value="ai-performance" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* AI Model Accuracy */}
             <Card>
               <CardHeader>
@@ -165,7 +296,7 @@ export default function Analytics() {
                       <span className="text-sm text-gray-600">94.2% accuracy</span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-green-600 h-2 rounded-full" style={{ width: '94.2%' }}></div>
+                      <div className="bg-green-600 h-2 rounded-full w-[94.2%]"></div>
                     </div>
                   </div>
                   <div>
@@ -174,7 +305,7 @@ export default function Analytics() {
                       <span className="text-sm text-gray-600">91.8% accuracy</span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-blue-600 h-2 rounded-full" style={{ width: '91.8%' }}></div>
+                      <div className="bg-blue-600 h-2 rounded-full w-[91.8%]"></div>
                     </div>
                   </div>
                   <div>
@@ -183,7 +314,7 @@ export default function Analytics() {
                       <span className="text-sm text-gray-600">87.5% accuracy</span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div className="bg-purple-600 h-2 rounded-full" style={{ width: '87.5%' }}></div>
+                      <div className="bg-purple-600 h-2 rounded-full w-[87.5%]"></div>
                     </div>
                   </div>
                 </div>
@@ -197,22 +328,22 @@ export default function Analytics() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center p-4 bg-red-50 rounded-lg">
+                  <div className="text-center p-3 bg-red-50 rounded-lg">
                     <p className="text-2xl font-bold text-red-600">5.8%</p>
                     <p className="text-sm text-gray-600">False Positives</p>
                     <p className="text-xs text-gray-500 mt-1">Good content flagged</p>
                   </div>
-                  <div className="text-center p-4 bg-orange-50 rounded-lg">
+                  <div className="text-center p-3 bg-orange-50 rounded-lg">
                     <p className="text-2xl font-bold text-orange-600">2.4%</p>
                     <p className="text-sm text-gray-600">False Negatives</p>
                     <p className="text-xs text-gray-500 mt-1">Bad content missed</p>
                   </div>
-                  <div className="text-center p-4 bg-green-50 rounded-lg">
+                  <div className="text-center p-3 bg-green-50 rounded-lg">
                     <p className="text-2xl font-bold text-green-600">0.8s</p>
                     <p className="text-sm text-gray-600">Avg Response</p>
                     <p className="text-xs text-gray-500 mt-1">Processing time</p>
                   </div>
-                  <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <div className="text-center p-3 bg-blue-50 rounded-lg">
                     <p className="text-2xl font-bold text-blue-600">99.2%</p>
                     <p className="text-sm text-gray-600">Uptime</p>
                     <p className="text-xs text-gray-500 mt-1">System availability</p>
@@ -223,8 +354,8 @@ export default function Analytics() {
           </div>
         </TabsContent>
 
-        <TabsContent value="user-behavior" className="mt-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TabsContent value="user-behavior" className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* User Reputation Distribution */}
             <Card>
               <CardHeader>
@@ -240,13 +371,10 @@ export default function Analytics() {
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div 
-                          className={`h-2 rounded-full ${
+                          className={`${
                             dist.range === '1-2' ? 'bg-red-500' :
                             dist.range === '2-4' ? 'bg-orange-500' : 'bg-green-500'
-                          }`}
-                          style={{ 
-                            width: `${((dist.count / (analytics?.stats?.activeUsers || 1)) * 100).toFixed(1)}%` 
-                          }}
+                          } h-2 rounded-full ${widthClassFromPercent((dist.count / (analytics?.stats?.activeUsers || 1)) * 100)}`}
                         ></div>
                       </div>
                     </div>
@@ -297,7 +425,7 @@ export default function Analytics() {
           </div>
         </TabsContent>
 
-        <TabsContent value="trends" className="mt-6">
+        <TabsContent value="trends" className="mt-4">
           <div className="grid grid-cols-1 gap-6">
             {/* Content Volume Trends */}
             <Card>
@@ -307,14 +435,10 @@ export default function Analytics() {
               <CardContent>
                 <div className="grid grid-cols-7 gap-2 mb-4">
                   {[...Array(30)].map((_, i) => {
-                    const height = Math.random() * 60 + 20;
+                    const heightClass = barHeights[Math.floor(Math.random() * barHeights.length)];
                     return (
                       <div key={i} className="flex flex-col items-center">
-                        <div 
-                          className="w-full bg-blue-500 rounded-t"
-                          style={{ height: `${height}px` }}
-                          title={`Day ${i + 1}`}
-                        ></div>
+                        <div className={`w-full bg-blue-500 rounded-t ${heightClass}`} title={`Day ${i + 1}`}></div>
                         {i % 5 === 0 && (
                           <span className="text-xs text-gray-500 mt-1">
                             {i + 1}

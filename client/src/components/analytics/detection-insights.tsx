@@ -10,6 +10,12 @@ interface DetectionInsightsProps {
 }
 
 export default function DetectionInsights({ insights, languageDistribution }: DetectionInsightsProps) {
+  const widthClassFromPercent = (pct: number) => {
+    const safePct = Math.max(0, Math.min(100, pct));
+    const rounded = Math.round(safePct / 5) * 5;
+    return `w-[${rounded}%]`;
+  };
+
   const getViolationTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
       hate_speech: 'Hate Speech',
@@ -36,11 +42,11 @@ export default function DetectionInsights({ insights, languageDistribution }: De
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-      <div className="p-6 border-b border-gray-200">
+      <div className="p-4 border-b border-gray-200">
         <h3 className="text-lg font-semibold text-gray-900">AI Detection Insights</h3>
       </div>
-      <div className="p-6">
-        <div className="space-y-6">
+      <div className="p-4">
+        <div className="space-y-5">
           {/* Content Type Distribution */}
           <div>
             <h4 className="text-sm font-medium text-gray-700 mb-3">Content Types Flagged Today</h4>
@@ -60,8 +66,7 @@ export default function DetectionInsights({ insights, languageDistribution }: De
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
-                      className={`h-2 rounded-full ${getViolationTypeColor(insight.type)}`}
-                      style={{ width: `${insight.percentage}%` }}
+                      className={`${getViolationTypeColor(insight.type)} h-2 rounded-full ${widthClassFromPercent(insight.percentage)}`}
                     ></div>
                   </div>
                 </div>

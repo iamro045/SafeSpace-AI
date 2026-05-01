@@ -309,6 +309,19 @@ export class PgStorage implements IStorage {
     return await db.select().from(moderationActions).orderBy(desc(moderationActions.createdAt));
   }
 
+  async getLatestModerationActionForContent(
+    contentId: string,
+    contentType: "post" | "comment"
+  ): Promise<ModerationAction | undefined> {
+    const result = await db
+      .select()
+      .from(moderationActions)
+      .where(and(eq(moderationActions.contentId, contentId), eq(moderationActions.contentType, contentType)))
+      .orderBy(desc(moderationActions.createdAt))
+      .limit(1);
+    return result[0];
+  }
+
   async getModerationActionsByModerator(moderatorId: string): Promise<ModerationAction[]> {
     return await db.select().from(moderationActions)
       .where(eq(moderationActions.moderatorId, moderatorId))
@@ -340,6 +353,18 @@ export class PgStorage implements IStorage {
       .set({
         status,
         errorMessage: errorMessage || null,
+        lastHealthCheck: new Date(),
+      })
+      .where(eq(aiModelStatusTable.modelName, modelName));
+  }
+
+  async updateAIModelInfo(modelName: string, updates: { status?: string; errorMessage?: string | null; version?: string | null; configuration?: any }): Promise<void> {
+    await db.update(aiModelStatusTable)
+      .set({
+        status: updates.status,
+        errorMessage: updates.errorMessage,
+        version: updates.version,
+        configuration: updates.configuration,
         lastHealthCheck: new Date(),
       })
       .where(eq(aiModelStatusTable.modelName, modelName));

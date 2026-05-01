@@ -1,6 +1,128 @@
 import { storage } from "../storage";
 import { aiService, AIDetectionResult } from "./aiService";
 import { reputationService } from "./reputationService";
+import { appConfig, type EnforcementAction } from "../config";
+
+export type ModerationDecision = {
+  action: EnforcementAction;
+  moderationStatus: "approved" | "flagged" | "rejected";
+  moderationReason: string | null;
+  ai: {
+    classificationLabel: string;
+    confidence: number;
+    severityScore: number;
+    violationType: string[];
+    contributingTerms: string[];
+    explanation: string;
+    detectedLanguage: string;
+  };
+};
+
+function moderationStatusRank(status: string | null | undefined): number {
+  // Higher rank = more severe; never allow a later moderation pass to downgrade.
+  switch (status) {
+    case "rejected":
+      return 3;
+    case "flagged":
+      return 2;
+    case "approved":
+      return 1;
+    case "pending":
+    default:
+      return 0;
+  }
+}
+
+function shouldApplyDecision(currentStatus: string | null | undefined, nextStatus: string): boolean {
+  return moderationStatusRank(nextStatus) >= moderationStatusRank(currentStatus);
+}
+
+function decideEnforcement(aiResult: AIDetectionResult): ModerationDecision {
+  if (!aiResult.isViolation) {
+    return {
+      action: "allow",
+      moderationStatus: "approved",
+      moderationReason: null,
+      ai: {
+        classificationLabel: aiResult.classificationLabel,
+        confidence: aiResult.confidence,
+        severityScore: aiResult.severityScore,
+        violationType: aiResult.violationType,
+        contributingTerms: aiResult.contributingTerms,
+        explanation: aiResult.explanation,
+        detectedLanguage: aiResult.detectedLanguage,
+      },
+    };
+  }
+
+  const { confidence, severityScore } = aiResult;
+
+  if (confidence >= appConfig.moderation.blockConfidence || severityScore >= appConfig.moderation.blockSeverity) {
+    return {
+      action: "block",
+      moderationStatus: "rejected",
+      moderationReason: aiResult.explanation,
+      ai: {
+        classificationLabel: aiResult.classificationLabel,
+        confidence,
+        severityScore,
+        violationType: aiResult.violationType,
+        contributingTerms: aiResult.contributingTerms,
+        explanation: aiResult.explanation,
+        detectedLanguage: aiResult.detectedLanguage,
+      },
+    };
+  }
+
+  if (confidence >= appConfig.moderation.escalateConfidence || severityScore >= appConfig.moderation.escalateSeverity) {
+    return {
+      action: "escalate",
+      moderationStatus: "flagged",
+      moderationReason: `Requires review: ${aiResult.explanation}`,
+      ai: {
+        classificationLabel: aiResult.classificationLabel,
+        confidence,
+        severityScore,
+        violationType: aiResult.violationType,
+        contributingTerms: aiResult.contributingTerms,
+        explanation: aiResult.explanation,
+        detectedLanguage: aiResult.detectedLanguage,
+      },
+    };
+  }
+
+  if (confidence >= appConfig.moderation.warnConfidence || severityScore >= appConfig.moderation.warnSeverity) {
+    return {
+      action: "warn",
+      moderationStatus: "approved",
+      moderationReason: `Warning: ${aiResult.explanation}`,
+      ai: {
+        classificationLabel: aiResult.classificationLabel,
+        confidence,
+        severityScore,
+        violationType: aiResult.violationType,
+        contributingTerms: aiResult.contributingTerms,
+        explanation: aiResult.explanation,
+        detectedLanguage: aiResult.detectedLanguage,
+      },
+    };
+  }
+
+  return {
+    action: "allow",
+    moderationStatus: "approved",
+    moderationReason: null,
+    ai: {
+      classificationLabel: aiResult.classificationLabel,
+      confidence,
+      severityScore,
+      violationType: aiResult.violationType,
+      contributingTerms: aiResult.contributingTerms,
+      explanation: aiResult.explanation,
+      detectedLanguage: aiResult.detectedLanguage,
+    },
+  };
+}
 
 export class ModerationService {
   // Moderate text content (posts/comments)
@@ -10,45 +132,37 @@ export class ModerationService {
     contentType: "post" | "comment",
     userId: string,
     language: string = "en"
-  ): Promise<void> {
+  ): Promise<ModerationDecision> {
     try {
       // Run AI analysis
       const aiResult = await aiService.analyzeText(content, language);
-      
-      // Determine moderation action based on AI result
-      let moderationStatus = "approved";
-      let moderationReason = null;
-      
-      if (aiResult.isViolation) {
-        if (aiResult.confidence >= 0.9) {
-          // High confidence - auto-block
-          moderationStatus = "rejected";
-          moderationReason = aiResult.explanation;
-          
-          // Update user reputation
-          await reputationService.adjustReputationForViolation(userId, aiResult.violationType, aiResult.confidence);
-          
-        } else if (aiResult.confidence >= 0.7) {
-          // Medium confidence - flag for review
-          moderationStatus = "flagged";
-          moderationReason = `Requires review: ${aiResult.explanation}`;
-        }
+
+      const decision = decideEnforcement(aiResult);
+
+      // Avoid downgrading moderation status if multiple passes run (e.g., text + image).
+      const current = contentType === "post" ? await storage.getPost(contentId) : await storage.getComment(contentId);
+      if (current && !shouldApplyDecision((current as any).moderationStatus, decision.moderationStatus)) {
+        return decision;
+      }
+
+      if (decision.action === "block") {
+        await reputationService.adjustReputationForViolation(userId, aiResult.violationType, aiResult.confidence);
       }
 
       // Update content moderation status
       if (contentType === "post") {
         await storage.updatePostModerationStatus(
           contentId,
-          moderationStatus,
-          moderationReason,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
           aiResult.confidence,
           aiResult.violationType
         );
       } else {
         await storage.updateCommentModerationStatus(
           contentId,
-          moderationStatus,
-          moderationReason,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
           aiResult.confidence,
           aiResult.violationType
         );
@@ -59,17 +173,22 @@ export class ModerationService {
         contentId,
         contentType,
         moderatorId: null, // AI moderation
-        action: moderationStatus === "rejected" ? "reject" : moderationStatus === "flagged" ? "flag" : "approve",
-        reason: moderationReason,
+        action: decision.moderationStatus === "rejected" ? "reject" : decision.moderationStatus === "flagged" ? "flag" : "approve",
+        reason: decision.moderationReason,
         isAutomatic: true,
         aiModel: "Text Analysis",
         confidence: aiResult.confidence,
         details: {
+          action: decision.action,
           violationType: aiResult.violationType,
+          classificationLabel: aiResult.classificationLabel,
+          severityScore: aiResult.severityScore,
+          contributingTerms: aiResult.contributingTerms,
           detectedLanguage: aiResult.detectedLanguage,
         },
       });
 
+      return decision;
     } catch (error) {
       console.error("Error moderating text content:", error);
       
@@ -79,6 +198,21 @@ export class ModerationService {
       } else {
         await storage.updateCommentModerationStatus(contentId, "flagged", "AI analysis failed - requires manual review");
       }
+
+      return {
+        action: "escalate",
+        moderationStatus: "flagged",
+        moderationReason: "AI analysis failed - requires manual review",
+        ai: {
+          classificationLabel: "error",
+          confidence: 0,
+          severityScore: 0,
+          violationType: [],
+          contributingTerms: [],
+          explanation: "AI analysis failed",
+          detectedLanguage: language,
+        },
+      };
     }
   }
 
@@ -88,42 +222,38 @@ export class ModerationService {
     imageUrl: string,
     contentType: "post" | "comment",
     userId: string
-  ): Promise<void> {
+  ): Promise<ModerationDecision> {
     try {
       // Run AI image analysis
       const aiResult = await aiService.analyzeImage(imageUrl);
-      
-      let moderationStatus = "approved";
-      let moderationReason = null;
-      
-      if (aiResult.isViolation) {
-        if (aiResult.confidence >= 0.85) {
-          moderationStatus = "rejected";
-          moderationReason = aiResult.explanation;
-          
-          // Update user reputation for image violations
-          await reputationService.adjustReputationForViolation(userId, aiResult.violationType, aiResult.confidence);
-          
-        } else if (aiResult.confidence >= 0.6) {
-          moderationStatus = "flagged";
-          moderationReason = `Requires review: ${aiResult.explanation}`;
-        }
+
+      const decision = decideEnforcement(aiResult);
+
+      // Prevent a safe image decision from overwriting an existing text-based flag/reject.
+      const current = contentType === "post" ? await storage.getPost(contentId) : await storage.getComment(contentId);
+      if (current && !shouldApplyDecision((current as any).moderationStatus, decision.moderationStatus)) {
+        return decision;
+      }
+
+      if (decision.action === "block") {
+        // Only adjust reputation if we are actually applying a block.
+        await reputationService.adjustReputationForViolation(userId, aiResult.violationType, aiResult.confidence);
       }
 
       // Update content moderation status
       if (contentType === "post") {
         await storage.updatePostModerationStatus(
           contentId,
-          moderationStatus,
-          moderationReason,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
           aiResult.confidence,
           aiResult.violationType
         );
       } else {
         await storage.updateCommentModerationStatus(
           contentId,
-          moderationStatus,
-          moderationReason,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
           aiResult.confidence,
           aiResult.violationType
         );
@@ -134,18 +264,23 @@ export class ModerationService {
         contentId,
         contentType,
         moderatorId: null,
-        action: moderationStatus === "rejected" ? "reject" : moderationStatus === "flagged" ? "flag" : "approve",
-        reason: moderationReason,
+        action: decision.moderationStatus === "rejected" ? "reject" : decision.moderationStatus === "flagged" ? "flag" : "approve",
+        reason: decision.moderationReason,
         isAutomatic: true,
         aiModel: "Image Detection",
         confidence: aiResult.confidence,
         details: {
+          action: decision.action,
           violationType: aiResult.violationType,
+          classificationLabel: aiResult.classificationLabel,
+          severityScore: aiResult.severityScore,
+          contributingTerms: aiResult.contributingTerms,
           faces: (aiResult as any).faces,
           objects: (aiResult as any).objects,
         },
       });
 
+      return decision;
     } catch (error) {
       console.error("Error moderating image content:", error);
       
@@ -154,6 +289,106 @@ export class ModerationService {
       } else {
         await storage.updateCommentModerationStatus(contentId, "flagged", "Image analysis failed - requires manual review");
       }
+
+      return {
+        action: "escalate",
+        moderationStatus: "flagged",
+        moderationReason: "Image analysis failed - requires manual review",
+        ai: {
+          classificationLabel: "error",
+          confidence: 0,
+          severityScore: 0,
+          violationType: [],
+          contributingTerms: [],
+          explanation: "Image analysis failed",
+          detectedLanguage: "n/a",
+        },
+      };
+    }
+  }
+
+  // Moderate video content by sampling frames via ffmpeg and reusing image analysis
+  async moderateVideoContent(
+    contentId: string,
+    videoUrl: string,
+    contentType: "post" | "comment",
+    userId: string
+  ): Promise<ModerationDecision> {
+    try {
+      const aiResult = await aiService.analyzeVideo(videoUrl);
+      const decision = decideEnforcement(aiResult);
+
+      const current = contentType === "post" ? await storage.getPost(contentId) : await storage.getComment(contentId);
+      if (current && !shouldApplyDecision((current as any).moderationStatus, decision.moderationStatus)) {
+        return decision;
+      }
+
+      if (decision.action === "block") {
+        await reputationService.adjustReputationForViolation(userId, aiResult.violationType, aiResult.confidence);
+      }
+
+      if (contentType === "post") {
+        await storage.updatePostModerationStatus(
+          contentId,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
+          aiResult.confidence,
+          aiResult.violationType
+        );
+      } else {
+        await storage.updateCommentModerationStatus(
+          contentId,
+          decision.moderationStatus,
+          decision.moderationReason || undefined,
+          aiResult.confidence,
+          aiResult.violationType
+        );
+      }
+
+      await storage.createModerationAction({
+        contentId,
+        contentType,
+        moderatorId: null,
+        action: decision.moderationStatus === "rejected" ? "reject" : decision.moderationStatus === "flagged" ? "flag" : "approve",
+        reason: decision.moderationReason,
+        isAutomatic: true,
+        aiModel: "Video Analysis",
+        confidence: aiResult.confidence,
+        details: {
+          action: decision.action,
+          violationType: aiResult.violationType,
+          classificationLabel: aiResult.classificationLabel,
+          severityScore: aiResult.severityScore,
+          contributingTerms: aiResult.contributingTerms,
+          framesAnalyzed: (aiResult as any).framesAnalyzed,
+          frameSummaries: (aiResult as any).frameSummaries,
+        },
+      });
+
+      return decision;
+    } catch (error) {
+      console.error("Error moderating video content:", error);
+
+      if (contentType === "post") {
+        await storage.updatePostModerationStatus(contentId, "flagged", "Video analysis failed - requires manual review");
+      } else {
+        await storage.updateCommentModerationStatus(contentId, "flagged", "Video analysis failed - requires manual review");
+      }
+
+      return {
+        action: "escalate",
+        moderationStatus: "flagged",
+        moderationReason: "Video analysis failed - requires manual review",
+        ai: {
+          classificationLabel: "error",
+          confidence: 0,
+          severityScore: 0,
+          violationType: [],
+          contributingTerms: [],
+          explanation: "Video analysis failed",
+          detectedLanguage: "n/a",
+        },
+      };
     }
   }
 
@@ -224,7 +459,24 @@ export class ModerationService {
     const postsWithUsers = await Promise.all(
       allPosts.map(async (post) => {
         const user = await storage.getUser(post.userId);
-        return { ...post, user };
+        const latestAction = await storage.getLatestModerationActionForContent(post.id, "post");
+        const details = latestAction?.details && typeof latestAction.details === "object" ? (latestAction.details as any) : null;
+        const aiDetails = latestAction
+          ? {
+              actionId: latestAction.id,
+              isAutomatic: !!latestAction.isAutomatic,
+              aiModel: latestAction.aiModel,
+              confidence: latestAction.confidence,
+              reason: latestAction.reason,
+              createdAt: latestAction.createdAt,
+              classificationLabel: details?.classificationLabel,
+              severityScore: details?.severityScore,
+              detectedLanguage: details?.detectedLanguage,
+              contributingTerms: details?.contributingTerms,
+              violationType: details?.violationType,
+            }
+          : null;
+        return { ...post, user, aiDetails };
       })
     );
 
@@ -232,7 +484,24 @@ export class ModerationService {
       allComments.map(async (comment) => {
         const user = await storage.getUser(comment.userId);
         const post = await storage.getPost(comment.postId);
-        return { ...comment, user, post };
+        const latestAction = await storage.getLatestModerationActionForContent(comment.id, "comment");
+        const details = latestAction?.details && typeof latestAction.details === "object" ? (latestAction.details as any) : null;
+        const aiDetails = latestAction
+          ? {
+              actionId: latestAction.id,
+              isAutomatic: !!latestAction.isAutomatic,
+              aiModel: latestAction.aiModel,
+              confidence: latestAction.confidence,
+              reason: latestAction.reason,
+              createdAt: latestAction.createdAt,
+              classificationLabel: details?.classificationLabel,
+              severityScore: details?.severityScore,
+              detectedLanguage: details?.detectedLanguage,
+              contributingTerms: details?.contributingTerms,
+              violationType: details?.violationType,
+            }
+          : null;
+        return { ...comment, user, post, aiDetails };
       })
     );
 

@@ -5,18 +5,19 @@ import ContentQueue from "@/components/moderation/content-queue";
 import ModerationActions from "@/components/moderation/moderation-action";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import type { DashboardAnalytics, PendingContent } from "@/lib/types";
 
 export default function Dashboard() {
   const { toast } = useToast();
 
   // Fetch dashboard analytics
-  const { data: analytics, isLoading, error } = useQuery({
+  const { data: analytics, isLoading, error } = useQuery<DashboardAnalytics>({
     queryKey: ['/api/analytics/dashboard'],
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   // Fetch pending content
-  const { data: pendingContent, refetch: refetchPending } = useQuery({
+  const { data: pendingContent, refetch: refetchPending } = useQuery<PendingContent>({
     queryKey: ['/api/moderation/pending'],
     refetchInterval: 10000, // Refresh every 10 seconds
   });

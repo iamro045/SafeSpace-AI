@@ -1,34 +1,106 @@
 import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import type { AppConfigResponse } from "@/lib/types";
 
 interface CreatePostProps {
-  onCreatePost: (content: string, contentType: string, imageUrl?: string) => Promise<void>;
+  onCreatePost: (content: string, contentType: string, imageUrl: string | undefined, videoUrl: string | undefined, language: string) => Promise<void>;
 }
 
 export default function CreatePost({ onCreatePost }: CreatePostProps) {
   const [content, setContent] = useState("");
   const [contentType, setContentType] = useState("text");
   const [imageUrl, setImageUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [language, setLanguage] = useState("en");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  const { data: config } = useQuery<AppConfigResponse>({
+    queryKey: ["/api/config"],
+  });
+
+  const textCharLimit = config?.content?.textCharLimit ?? 500;
+  const maxImageBytes = config?.uploads?.maxImageBytes ?? 2 * 1024 * 1024;
+  const maxVideoBytes = (config as any)?.uploads?.maxVideoBytes ?? 25 * 1024 * 1024;
+
+  const uploadImageIfNeeded = async (): Promise<string | undefined> => {
+    if (!imageFile) return imageUrl || undefined;
+
+    const token = localStorage.getItem("auth_token");
+    const form = new FormData();
+    form.append("image", imageFile);
+
+    const res = await fetch("/api/uploads/images", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "Image upload failed");
+    }
+
+    const json = await res.json();
+    const data = json?.data ?? json; // supports envelope
+    return data?.url;
+  };
+
+  const uploadVideoIfNeeded = async (): Promise<string | undefined> => {
+    if (!videoFile) return videoUrl || undefined;
+
+    const token = localStorage.getItem("auth_token");
+    const form = new FormData();
+    form.append("video", videoFile);
+
+    const res = await fetch("/api/uploads/videos", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || "Video upload failed");
+    }
+
+    const json = await res.json();
+    const data = json?.data ?? json; // supports envelope
+    return data?.url;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
+    if (content.length > textCharLimit) return;
 
     setIsSubmitting(true);
     try {
-      await onCreatePost(content, contentType, imageUrl || undefined);
+      const uploadedImageUrl = contentType === "image" ? await uploadImageIfNeeded() : undefined;
+      const uploadedVideoUrl = contentType === "video" ? await uploadVideoIfNeeded() : undefined;
+      await onCreatePost(content, contentType, uploadedImageUrl, uploadedVideoUrl, language);
       setContent("");
       setImageUrl("");
+      setImageFile(null);
+      setVideoUrl("");
+      setVideoFile(null);
       setContentType("text");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating post:", error);
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to create post. Please check the file format.",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -79,7 +151,17 @@ export default function CreatePost({ onCreatePost }: CreatePostProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="content-type">Content Type</Label>
-            <Select value={contentType} onValueChange={setContentType}>
+            <Select value={contentType} onValueChange={(v) => {
+              setContentType(v);
+              if (v !== "image") {
+                setImageFile(null);
+                setImageUrl("");
+              }
+              if (v !== "video") {
+                setVideoFile(null);
+                setVideoUrl("");
+              }
+            }}>
               <SelectTrigger data-testid="select-content-type">
                 <SelectValue placeholder="Select content type" />
               </SelectTrigger>
@@ -108,18 +190,71 @@ export default function CreatePost({ onCreatePost }: CreatePostProps) {
 
         {contentType === "image" && (
           <div>
-            <Label htmlFor="image-url">Image URL (Optional)</Label>
+            <Label htmlFor="image-file">Image Upload (JPG/PNG/WEBP)</Label>
             <Input
-              id="image-url"
-              type="url"
-              placeholder="https://example.com/image.jpg"
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              data-testid="input-image-url"
+              id="image-file"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setImageFile(f);
+                if (f) setImageUrl("");
+              }}
+              data-testid="input-image-file"
             />
             <p className="text-sm text-gray-500 mt-1">
-              Add an image URL to test image moderation features
+              Max size: {Math.round(maxImageBytes / 1024 / 1024)}MB. Or use an Image URL below.
             </p>
+
+            <div className="mt-3">
+              <Label htmlFor="image-url">Image URL (Optional)</Label>
+              <Input
+                id="image-url"
+                type="url"
+                placeholder="https://example.com/image.jpg"
+                value={imageUrl}
+                onChange={(e) => {
+                  setImageUrl(e.target.value);
+                  if (e.target.value) setImageFile(null);
+                }}
+                data-testid="input-image-url"
+              />
+            </div>
+          </div>
+        )}
+
+        {contentType === "video" && (
+          <div>
+            <Label htmlFor="video-file">Video Upload (MP4/WebM/MOV)</Label>
+            <Input
+              id="video-file"
+              type="file"
+              accept="video/mp4,video/webm,video/quicktime"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setVideoFile(f);
+                if (f) setVideoUrl("");
+              }}
+              data-testid="input-video-file"
+            />
+            <p className="text-sm text-gray-500 mt-1">
+              Max size: {Math.round(maxVideoBytes / 1024 / 1024)}MB. Or use a Video URL below.
+            </p>
+
+            <div className="mt-3">
+              <Label htmlFor="video-url">Video URL (Optional)</Label>
+              <Input
+                id="video-url"
+                type="url"
+                placeholder="https://example.com/video.mp4"
+                value={videoUrl}
+                onChange={(e) => {
+                  setVideoUrl(e.target.value);
+                  if (e.target.value) setVideoFile(null);
+                }}
+                data-testid="input-video-url"
+              />
+            </div>
           </div>
         )}
 
@@ -136,7 +271,7 @@ export default function CreatePost({ onCreatePost }: CreatePostProps) {
           />
           <div className="flex items-center justify-between mt-2">
             <span className="text-sm text-gray-500">
-              {content.length}/500 characters
+              {content.length}/{textCharLimit} characters
             </span>
             <Badge variant="outline" className="text-xs">
               {language.toUpperCase()}
@@ -146,7 +281,7 @@ export default function CreatePost({ onCreatePost }: CreatePostProps) {
 
         <Button
           type="submit"
-          disabled={!content.trim() || isSubmitting}
+          disabled={!content.trim() || isSubmitting || content.length > textCharLimit}
           className="w-full bg-primary hover:bg-primary/90"
           data-testid="button-create-post"
         >
